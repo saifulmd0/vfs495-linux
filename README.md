@@ -40,7 +40,20 @@ then yes. This is the **Falcon**‑generation Validity swipe sensor (older than 
   other VFS495 project, we let HP's proprietary binary establish the session (see
   [`docs/SSL_PROTOCOL.md`](docs/SSL_PROTOCOL.md)).
 
-## Quick start
+## Quick start (the easy way — one package)
+
+Download the latest `vfs495-fprint_*_amd64.deb` from the
+[Releases page](https://github.com/saifulmd0/vfs495-linux/releases), then:
+```bash
+sudo apt install ./vfs495-fprint_*_amd64.deb   # pulls deps, downloads HP's driver from HP, sets up fprintd+PAM
+fprintd-enroll                                  # swipe the same finger slowly, full length, when prompted
+sudo -k && sudo true                            # test: swipe → fingerprint login works (password still works)
+```
+That's it — no tinkering. The package fetches HP's proprietary driver from HP's own server at install
+time (it is not redistributed), configures the capture service, fprintd, udev and PAM.
+Build it yourself: `packaging/build-deb.sh`.
+
+## Quick start (manual / development)
 
 You need HP's Validity Linux driver package (proprietary; **not** redistributed here) — see
 [`runtime/README.md`](runtime/README.md) for the one‑time harness setup (download from HP, extract,

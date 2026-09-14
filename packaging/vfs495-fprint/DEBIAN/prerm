@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+systemctl disable --now vfs495-bridge 2>/dev/null || true
+pam-auth-update --package --remove fprintd 2>/dev/null || true
+exit 0

@@ -1,0 +1,16 @@
+Package: vfs495-fprint
+Version: 0.1.0
+Section: misc
+Priority: optional
+Architecture: amd64
+Depends: fprintd, libpam-fprintd, gdb, python3, libusb-0.1-4, 7zip | p7zip-full, curl | wget, ca-certificates, systemd
+Maintainer: saifulmd0 <saifulmd0@users.noreply.github.com>
+Homepage: https://github.com/saifulmd0/vfs495-linux
+Description: Fingerprint login for the Validity VFS495 (138a:003f) reader
+ Enables fingerprint authentication (login, sudo, screen unlock via fprintd + PAM)
+ for the Validity Sensors VFS495 swipe reader found in 2013-2015 HP EliteBook,
+ ProBook and ZBook laptops, which libfprint does not support natively.
+ .
+ On install it downloads HP's proprietary Validity Linux driver from HP's own
+ server (not redistributed here), and sets up a capture service that feeds
+ fprintd. After installing, run: fprintd-enroll

@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+case "$1" in configure)
+  echo "vfs495-fprint: fetching HP driver..."
+  if ! /usr/lib/vfs495-fprint/setup-hp-driver.sh; then
+    echo "vfs495-fprint: HP driver download failed. Re-run later: sudo vfs495-setup-hp-driver" >&2
+  fi
+  udevadm control --reload-rules 2>/dev/null || true; udevadm trigger 2>/dev/null || true
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl restart fprintd 2>/dev/null || true
+  systemctl enable vfs495-bridge 2>/dev/null || true
+  [ -x /var/lib/vfs495-fprint/validity-sensor-unlocked ] && systemctl start vfs495-bridge 2>/dev/null || true
+  pam-auth-update --package --enable fprintd 2>/dev/null || true
+  echo ""
+  echo "vfs495-fprint installed. Enroll your finger with:   fprintd-enroll"
+  echo "(swipe the same finger slowly, full length, when prompted; then try: sudo -k; sudo true)"
+  ;;
+esac
+exit 0

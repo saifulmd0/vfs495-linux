@@ -1,0 +1,3 @@
+This package (vfs495-fprint) is MIT licensed: https://github.com/saifulmd0/vfs495-linux
+It does NOT contain HP/Validity/Synaptics proprietary software. The HP Validity driver
+is downloaded from HP's server at install time by setup-hp-driver.sh.

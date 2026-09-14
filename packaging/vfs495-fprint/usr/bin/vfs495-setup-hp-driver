@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/lib/vfs495-fprint/setup-hp-driver.sh "$@"

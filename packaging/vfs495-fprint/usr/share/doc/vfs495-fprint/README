@@ -1,0 +1,4 @@
+vfs495-fprint — fingerprint login for the Validity VFS495 (138a:003f)
+After install:  fprintd-enroll   (then sudo -k; sudo true to test)
+Password always remains as a fallback. Homepage: https://github.com/saifulmd0/vfs495-linux
+If the sensor stops registering swipes after heavy use, reboot.

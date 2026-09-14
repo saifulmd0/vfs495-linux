@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+if [ "$1" = purge ]; then rm -rf /var/lib/vfs495-fprint /run/vfs495-fprint; fi
+systemctl daemon-reload 2>/dev/null || true
+systemctl restart fprintd 2>/dev/null || true
+exit 0

@@ -1,0 +1,15 @@
+[Unit]
+Description=VFS495 fingerprint capture bridge (feeds fprintd)
+After=fprintd.service
+ConditionPathExists=/var/lib/vfs495-fprint/validity-sensor-unlocked
+
+[Service]
+Type=simple
+User=root
+Environment=FP_VIRTUAL_IMAGE=/run/fprint/virtimg_sock
+ExecStart=/usr/bin/python3 /usr/lib/vfs495-fprint/bridge.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
