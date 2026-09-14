@@ -113,7 +113,9 @@ fprintd (NBIS minutiae + bozorth3)  →  enroll / verify  →  PAM (login, sudo,
 ## Limitations
 
 - **Capture uses HP's proprietary binary under `gdb`, as root.** It works, but it's a harness, not
-  a driver: fragile, heavy when idle, and needs HP's (freely downloadable) package present.
+  a driver, and needs HP's (freely downloadable) package present. The packaged bridge is
+  **event-driven** (idle until fprintd reports `finger-needed`), so it does not touch the sensor when
+  nobody is authenticating.
 - **The sensor can get stuck** after many rapid captures (returns near‑empty scans). A **reboot**
   clears it; USB re‑enumeration does not.
 - Password authentication always remains as a PAM fallback — you cannot be locked out.
