@@ -1,0 +1,36 @@
+# Never commit HP/Validity/Synaptics proprietary material
+hp-linux/
+hp-win/
+*.rpm
+*.img
+*.efi
+validity-sensor*
+vcsFPService*
+libvfsFprintWrapper*
+ghidra/out/
+*_decomp.c
+validity-sensor.c
+
+# Never commit biometric data or per-device secrets
+captures/
+*.pgm
+*.bin
+*.raw
+rsa_modulus.bin
+*_secrets.json
+kdf_vector.json
+rsa_*.json
+rec_vec.json
+wire_order.json
+finished_vec.json
+plaintext_cmds*.txt
+
+# build / runtime artifacts
+runtime/lib/
+runtime/bin/
+build/
+__pycache__/
+*.pyc
+*.o
+*.so
+test-storage.variant
