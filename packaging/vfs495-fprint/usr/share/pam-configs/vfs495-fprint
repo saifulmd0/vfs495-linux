@@ -1,0 +1,7 @@
+Name: Fingerprint authentication (VFS495 via vfs495-fprint)
+Default: yes
+Priority: 261
+Conflicts: fprint fprintd
+Auth-Type: Primary
+Auth:
+	[success=end default=ignore]	pam_fprintd.so max-tries=3 timeout=30

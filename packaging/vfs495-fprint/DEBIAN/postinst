@@ -10,7 +10,7 @@ case "$1" in configure)
   systemctl restart fprintd 2>/dev/null || true
   systemctl enable vfs495-bridge 2>/dev/null || true
   [ -x /var/lib/vfs495-fprint/validity-sensor-unlocked ] && systemctl start vfs495-bridge 2>/dev/null || true
-  pam-auth-update --package --enable fprintd 2>/dev/null || true
+  pam-auth-update --package --remove fprintd --enable vfs495-fprint 2>/dev/null || true
   echo ""
   echo "vfs495-fprint installed. Enroll your finger with:   fprintd-enroll"
   echo "(swipe the same finger slowly, full length, when prompted; then try: sudo -k; sudo true)"
