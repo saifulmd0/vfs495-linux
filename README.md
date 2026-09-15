@@ -122,9 +122,9 @@ fprintd (NBIS minutiae + bozorth3)  →  enroll / verify  →  PAM (login, sudo,
 - **Check your enrollment quality.** `sudo vfs495-match --capture 3` takes three swipes and prints
   the scores of each against your enrolled finger and against each other. Same finger should score
   40–150; if your swipes score well against each other but poorly against the enrolled template,
-  re-enroll: `fprintd-delete $USER && fprintd-enroll` (five slow, full swipes). Enroll from a
-  terminal with `fprintd-enroll`; the GNOME Settings dialog and a running verify can't share the
-  device.
+  re-enroll from exactly those swipes: `sudo vfs495-match --enroll /run/vfs495-fprint/test/swipe-*.pgm`
+  (or `fprintd-delete $USER && fprintd-enroll` for five fresh slow swipes). Enroll from a
+  terminal; the GNOME Settings dialog and a running verify can't share the device.
 - **The sensor can get stuck** after many rapid captures: it returns a few lines immediately
   instead of waiting for a finger, so every swipe is "tiny scan" / "not captured" and
   `vfs495-match --capture` reports e.g. `200x15`. Only a **full power-off** clears it (shut

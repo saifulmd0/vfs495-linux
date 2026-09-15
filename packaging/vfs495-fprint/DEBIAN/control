@@ -1,5 +1,5 @@
 Package: vfs495-fprint
-Version: 0.1.4
+Version: 0.1.5
 Section: misc
 Priority: optional
 Architecture: amd64

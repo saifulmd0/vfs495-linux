@@ -7,6 +7,8 @@
   sudo vfs495-match --capture N [DIR]             capture N swipes from the sensor into DIR
                                                     (default /run/vfs495-fprint/test), then score them
                                                     against each other and against your enrolled finger
+  sudo vfs495-match --enroll IMG.pgm [...]        enroll the given scans (e.g. the ones --capture just
+                                                    took) as your right index finger in fprintd
 
 Scores are libfprint/NBIS bozorth3 scores. fprintd accepts a swipe when the score against any
 enrolled sub-template is >= 40. Genuine swipes of the same finger typically score 40-150,
@@ -95,6 +97,42 @@ def enroll_from_image(dev, img, name):
         err(f"  enroll from {name} failed: {e.message}"); return None
 
 
+def enroll_from_images(dev, imgs, user):
+    """Build a template from several images, cycling through them for the 5 enroll stages."""
+    from gi.repository import Gio
+    tmpl = FPrint.Print.new(dev)
+    tmpl.set_finger(FPrint.Finger.RIGHT_INDEX); tmpl.set_username(user)
+    canc = Gio.Cancellable(); n = {"sent": 1}
+    def progress(device, completed, print_, user_data, error=None):
+        if n["sent"] >= 12: canc.cancel(); return
+        if completed < dev.get_nr_enroll_stages():
+            send_image(imgs[n["sent"] % len(imgs)], 0.2); n["sent"] += 1
+    send_image(imgs[0])
+    try:
+        return dev.enroll_sync(tmpl, canc, progress, None)
+    except GLib.Error as e:
+        raise SystemExit(f"enroll failed: {e.message}")
+
+
+def install_template(dev, files, imgs):
+    if os.geteuid() != 0: raise SystemExit("--enroll needs root: sudo vfs495-match --enroll IMG...")
+    user = os.environ.get("SUDO_USER") or "root"
+    print_ = enroll_from_images(dev, [imgs[f] for f in files], user)
+    data = bytes(print_.serialize())
+    d = f"/var/lib/fprint/{user}/virtual_image/0"; os.makedirs(d, mode=0o700, exist_ok=True)
+    for p in ("/var/lib/fprint", f"/var/lib/fprint/{user}", f"/var/lib/fprint/{user}/virtual_image", d): os.chmod(p, 0o700)
+    path = d + "/7"                               # 7 = right index finger in fprintd's file store
+    if os.path.exists(path): os.replace(path, path + ".bak")
+    with open(path, "wb") as fh: fh.write(data)
+    os.chmod(path, 0o644)
+    out(f"enrolled right index finger for {user} from {len(files)} scan(s) -> {path}")
+    out("check of the new template against those scans:")
+    for f in files:
+        m, s_ = verify(dev, print_, imgs[f], f); out(f"  {os.path.basename(f):<20} {fmt(m, s_)}")
+    subprocess.run(["systemctl", "restart", "fprintd"], stderr=subprocess.DEVNULL)
+    out("\nnow test:  fprintd-verify   (wait ~2 s after the prompt, then swipe)")
+
+
 def verify(dev, template, img, name):
     """Returns (matched, best_score)."""
     del _lines[:]
@@ -153,7 +191,7 @@ def find_templates():
 def main(argv):
     args = argv[1:]
     if not args or args[0] in ("-h", "--help"): out(__doc__); return 0
-    template_file = None; files = []
+    template_file = None; files = []; enroll = False
     if args[0] == "--capture":
         n = int(args[1]) if len(args) > 1 else 3
         d = args[2] if len(args) > 2 else "/run/vfs495-fprint/test"
@@ -162,6 +200,7 @@ def main(argv):
         out("")
     else:
         if args[0] == "--template": template_file, args = args[1], args[2:]
+        if args and args[0] == "--enroll": enroll, args = True, args[1:]
         files = args
     if not files: raise SystemExit("no images given")
     imgs = {f: read_pgm(f) for f in files}
@@ -171,6 +210,10 @@ def main(argv):
     if not files: raise SystemExit("no usable images")
     ctx, dev = open_device()
     out(f"matcher: libfprint {dev.get_driver()} (NBIS bozorth3), threshold {THRESHOLD}\n")
+    if enroll:
+        install_template(dev, files, imgs)
+        if _conn: _conn.close()
+        dev.close_sync(None); return 0
 
     templates = []
     if template_file: templates.append((template_file, open(template_file, "rb").read()))
