@@ -8,7 +8,7 @@ This project reverse‑engineers the sensor and provides a **working end‑to‑
 image assembly → enrollment → verification, wired into **fprintd + PAM** so you can unlock
 `sudo`, the login screen, and the lock screen with your fingerprint.
 
-> Status: **working proof‑of‑concept.** Genuine finger vs. impostor match scores 79 vs 5
+> Status: **working.** Verified end-to-end on an HP EliteBook (Debian 13): enroll, `fprintd-verify`, `sudo` and login via the packaged `.deb`. Genuine finger vs. impostor match scores 79 vs 5
 > (threshold 40). It is *not yet a native libfprint driver* — capture currently drives HP's
 > proprietary userspace binary under `gdb` (see [Limitations](#limitations)). A native driver is
 > the roadmap. Contributions welcome.
