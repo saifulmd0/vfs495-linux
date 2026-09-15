@@ -13,7 +13,8 @@ case "$1" in configure)
   pam-auth-update --package --remove fprintd --enable vfs495-fprint 2>/dev/null || true
   echo ""
   echo "vfs495-fprint installed. Enroll your finger with:   fprintd-enroll"
-  echo "(swipe the same finger slowly, full length, when prompted; then try: sudo -k; sudo true)"
+  echo "(swipe the same finger slowly, full length, each time it prompts; wait ~2 s after the prompt before swiping)"
+  echo "Test / see match scores:   sudo vfs495-match --capture 3"
   ;;
 esac
 exit 0

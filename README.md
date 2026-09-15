@@ -110,15 +110,31 @@ fprintd (NBIS minutiae + bozorth3)  →  enroll / verify  →  PAM (login, sudo,
 | `ghidra/` | Ghidra script to reproduce the decompilation/analysis. |
 | `docs/` | `FINDINGS.md` (full RE log), `SSL_PROTOCOL.md`, `WRAPPER.md`, `SETUP_FPRINTD.md`. |
 
+## Troubleshooting
+
+- **Swipe timing.** When a prompt appears (login, `sudo`, `fprintd-enroll`), the sensor needs about
+  2 seconds to arm (HP's binary is started and initialises the secure session). **Wait a moment,
+  then swipe slowly**, whole fingertip, one steady motion. A swipe made instantly after the prompt
+  is usually missed; just swipe again — the capture waits up to 60 s and retries once.
+- **See what happened.** `sudo journalctl -u vfs495-bridge -f` shows *finger needed → swipe now*,
+  *delivered scan*, or *no finger captured*. `sudo journalctl -u fprintd | grep score` shows the
+  matcher's score for every swipe (**≥ 40 = match**).
+- **Check your enrollment quality.** `sudo vfs495-match --capture 3` takes three swipes and prints
+  the scores of each against your enrolled finger and against each other. Same finger should score
+  40–150; if your swipes score well against each other but poorly against the enrolled template,
+  re-enroll: `fprintd-delete $USER && fprintd-enroll` (five slow, full swipes). Enroll from a
+  terminal with `fprintd-enroll`; the GNOME Settings dialog and a running verify can't share the
+  device.
+- **The sensor can get stuck** after many rapid captures (it returns near-empty scans, every swipe
+  "not captured"). A **reboot** clears it; USB re-enumeration does not.
+- Password authentication always remains as a PAM fallback — you cannot be locked out.
+
 ## Limitations
 
 - **Capture uses HP's proprietary binary under `gdb`, as root.** It works, but it's a harness, not
   a driver, and needs HP's (freely downloadable) package present. The packaged bridge is
-  **event-driven** (idle until fprintd reports `finger-needed`), so it does not touch the sensor when
-  nobody is authenticating.
-- **The sensor can get stuck** after many rapid captures (returns near‑empty scans). A **reboot**
-  clears it; USB re‑enumeration does not.
-- Password authentication always remains as a PAM fallback — you cannot be locked out.
+  **event-driven** (idle until fprintd reports `finger-needed`, cancelled when it stops), so it
+  does not touch the sensor when nobody is authenticating.
 
 ## Roadmap
 
