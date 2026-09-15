@@ -125,8 +125,11 @@ fprintd (NBIS minutiae + bozorth3)  →  enroll / verify  →  PAM (login, sudo,
   re-enroll: `fprintd-delete $USER && fprintd-enroll` (five slow, full swipes). Enroll from a
   terminal with `fprintd-enroll`; the GNOME Settings dialog and a running verify can't share the
   device.
-- **The sensor can get stuck** after many rapid captures (it returns near-empty scans, every swipe
-  "not captured"). A **reboot** clears it; USB re-enumeration does not.
+- **The sensor can get stuck** after many rapid captures: it returns a few lines immediately
+  instead of waiting for a finger, so every swipe is "tiny scan" / "not captured" and
+  `vfs495-match --capture` reports e.g. `200x15`. Only a **full power-off** clears it (shut
+  down, wait 10 s, power on). A warm reboot, USB re-enumeration and a USB port power cycle do
+  not — the sensor keeps its state while the board stays powered.
 - Password authentication always remains as a PAM fallback — you cannot be locked out.
 
 ## Limitations

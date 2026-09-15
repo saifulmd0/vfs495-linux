@@ -10,6 +10,7 @@ from gi.repository import GLib
 
 SOCK = os.environ.get("FP_VIRTUAL_IMAGE", "/run/fprint/virtimg_sock")
 CAPTURE = "/usr/lib/vfs495-fprint/capture.py"
+MIN_ROWS = 80                                # a real swipe assembles to ~200x300; tiny = no usable print
 RUN = "/run/vfs495-fprint"                  # tmpfs, root only; last.pgm = most recent capture (debugging)
 BUS_NAME, DEV_IFACE = "net.reactivated.Fprint", "net.reactivated.Fprint.Device"
 PROPS = "org.freedesktop.DBus.Properties"
@@ -53,12 +54,16 @@ def capture_and_deliver(gen):
             if state["gen"] != gen or not state["wanted"]:
                 log("capture cancelled (fprintd no longer waiting)"); return
             if ok:
-                try:
-                    img = read_pgm(out); os.replace(out, last)
-                    deliver(*img); log(f"delivered scan {img[0]}x{img[1]} after {time.monotonic()-t0:.1f}s"); return
-                except OSError as e:
-                    log(f"deliver failed: {e}"); return
-            log("no finger captured" + (", retrying" if attempt == 0 else " (give up)"))
+                img = read_pgm(out); os.replace(out, last)
+                if img[1] < MIN_ROWS:
+                    log(f"sensor returned a tiny scan ({img[0]}x{img[1]}): swipe too short/fast, or the sensor is in "
+                        "its stuck state (then: full power-off, not a reboot)"); ok = False
+                else:
+                    try:
+                        deliver(*img); log(f"delivered scan {img[0]}x{img[1]} after {time.monotonic()-t0:.1f}s"); return
+                    except OSError as e:
+                        log(f"deliver failed: {e}"); return
+            if not ok: log("no usable finger scan" + (", retrying" if attempt == 0 else " (give up)"))
     finally:
         try: os.unlink(out)
         except OSError: pass

@@ -94,8 +94,8 @@ sudo -k && sudo true          # should prompt to swipe; password still works as 
   scripts; keep that tree in place.
 - **Timing.** fprintd waits ~30 s for a finger. Swipe promptly when prompted. If a verify times
   out, just retry — the bridge is always ready to capture.
-- **Sensor gets stuck** after many rapid captures (returns ~39 lines / empty). A full **reboot**
-  clears it (USB re-enumeration does not). Space out enrollments.
+- **Sensor gets stuck** after many rapid captures (returns ~39 lines / empty). A full **power-off**
+  clears it (a warm reboot or USB re-enumeration does not). Space out enrollments.
 - **Password always works.** `pam_fprintd` is `sufficient`, not `required`, so a failed/absent
   swipe falls through to your password. You are never locked out.
 - **Undo everything:** `sudo pam-auth-update` (untick), `sudo systemctl disable --now

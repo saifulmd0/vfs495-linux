@@ -15,6 +15,7 @@ different fingers < 15. No sensor is touched unless --capture is used.
 import os, sys, re, glob, socket, struct, subprocess, tempfile, threading, time
 
 THRESHOLD = 40
+MIN_ROWS = 80
 CAPTURE = "/usr/lib/vfs495-fprint/capture.py"
 
 # --- must happen before libfprint is loaded: private socket + score debug output ---
@@ -82,13 +83,16 @@ def enroll_from_image(dev, img, name):
     """Build a template from one image (fed for each of the 5 enroll stages)."""
     tmpl = FPrint.Print.new(dev)
     tmpl.set_finger(FPrint.Finger.RIGHT_INDEX); tmpl.set_username("vfs495-match")
+    from gi.repository import Gio
+    canc = Gio.Cancellable(); n = {"sent": 1}
     def progress(device, completed, print_, user_data, error=None):
-        if completed < dev.get_nr_enroll_stages(): send_image(img, 0.2)
+        if n["sent"] >= 8: canc.cancel(); return          # image keeps failing minutiae extraction
+        if completed < dev.get_nr_enroll_stages(): n["sent"] += 1; send_image(img, 0.2)
     send_image(img)
     try:
-        return dev.enroll_sync(tmpl, None, progress, None)
+        return dev.enroll_sync(tmpl, canc, progress, None)
     except GLib.Error as e:
-        raise SystemExit(f"enroll from {name} failed: {e.message}")
+        err(f"  enroll from {name} failed: {e.message}"); return None
 
 
 def verify(dev, template, img, name):
@@ -115,7 +119,7 @@ def capture(n, d):
     if not os.path.exists("/var/lib/vfs495-fprint/validity-sensor-unlocked"):
         raise SystemExit("HP driver not installed; run: sudo vfs495-setup-hp-driver")
     subprocess.run(["systemctl", "stop", "vfs495-bridge"], stderr=subprocess.DEVNULL)
-    os.makedirs(d, exist_ok=True); files = []
+    os.makedirs(d, exist_ok=True); files = []; tiny = []
     try:
         for i in range(1, n + 1):
             p = f"{d}/swipe-{i}.pgm"
@@ -123,12 +127,21 @@ def capture(n, d):
             out(f"[{i}/{n}] SWIPE NOW (slowly, whole fingertip, one steady motion)")
             r = subprocess.run([sys.executable, CAPTURE, p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if r.returncode == 0:
-                w, h, _ = read_pgm(p); out(f"[{i}/{n}] captured {w}x{h} -> {p}"); files.append(p)
+                w, h, _ = read_pgm(p)
+                if h < MIN_ROWS:
+                    out(f"[{i}/{n}] tiny scan {w}x{h}: swipe too short/fast, or the sensor is stuck (see below)")
+                    tiny.append(h); os.unlink(p)
+                else:
+                    out(f"[{i}/{n}] captured {w}x{h} -> {p}"); files.append(p)
             else:
                 out(f"[{i}/{n}] nothing captured (missed the swipe?)")
             time.sleep(1.5)
     finally:
         subprocess.run(["systemctl", "start", "vfs495-bridge"], stderr=subprocess.DEVNULL)
+    if tiny and not files:
+        out("\nEvery scan was tiny. If you did swipe slowly, the sensor is in its stuck state: it returns a few"
+            "\nlines and never waits for a finger. Only a FULL POWER-OFF (shut down, wait 10 s, power on) clears it;"
+            "\na warm reboot does not.")
     return files
 
 
@@ -152,6 +165,10 @@ def main(argv):
         files = args
     if not files: raise SystemExit("no images given")
     imgs = {f: read_pgm(f) for f in files}
+    for f in list(files):
+        if imgs[f][1] < MIN_ROWS:
+            err(f"{f}: only {imgs[f][1]} rows, not a usable scan (skipped)"); files.remove(f)
+    if not files: raise SystemExit("no usable images")
     ctx, dev = open_device()
     out(f"matcher: libfprint {dev.get_driver()} (NBIS bozorth3), threshold {THRESHOLD}\n")
 
@@ -173,6 +190,7 @@ def main(argv):
         out("each image enrolled, verified with every other image:")
         for a in files:
             tmpl = enroll_from_image(dev, imgs[a], a)
+            if tmpl is None: continue
             for b in files:
                 if a == b: continue
                 m, s = verify(dev, tmpl, imgs[b], b)
