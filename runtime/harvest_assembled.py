@@ -1,5 +1,5 @@
 # gdb: harvest the fully-assembled (motion-compensated) image from IRqualityDetermination entry.
-import gdb, os, os, struct
+import gdb, os, socket, struct
 OUT = os.environ.get("VFS_ASM_OUT", os.path.expanduser(os.environ.get("VFS495_HOME","~/vfs495-re"))+"/captures/assembled.bin")
 state = {"n": 0}
 class BP(gdb.Breakpoint):
@@ -21,6 +21,22 @@ class BP(gdb.Breakpoint):
             print("memerr", e)
         return False
 BP("*0x4689b0")
+# Finger-on: HP raises sensor event 0xd0 (idsSensorEventPerformCallback, event id in esi) when its
+# wake-on-event sees a finger => it is silent while idle (0xcc = armed). Report it once to virtual_image
+# as (-4, 1) so fprintd's finger-present goes true at swipe start, not after the image is assembled.
+FINGER_SOCK = os.environ.get("VFS_FINGER_SOCK")
+class FingerOnBP(gdb.Breakpoint):
+    def stop(self):
+        try:
+            if int(gdb.selected_frame().read_register("rsi")) & 0xffffffff != 0xd0: return False
+        except gdb.error: return False
+        self.enabled = False
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(1)
+            s.connect(FINGER_SOCK); s.sendall(struct.pack("<ii", -4, 1)); s.close()
+        except OSError: pass
+        return False
+if FINGER_SOCK: FingerOnBP("*0x459bf0")
 gdb.execute("run getprintwait -doinit")
 print("ASM_HITS", state["n"])
 gdb.execute("quit")

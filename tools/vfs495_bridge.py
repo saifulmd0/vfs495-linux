@@ -29,11 +29,12 @@ def read_pgm(path):
         return w, h, f.read(w * h)
 
 
-def capture():
+def capture(sock_path):
     """Capture one fingerprint via the tool's motion-compensated assembly; (w,h,bytes) or None."""
     out = "/tmp/vfs495_cap.pgm"
+    # VFS_FINGER_SOCK: harvest_assembled.py reports finger-on (-4, 1) to libfprint at swipe start
     r = subprocess.run([sys.executable, HERE + "/vfs495_capture_asm.py", out],
-                       env={**os.environ, "VFS_TIMEOUT": "75"})
+                       env={**os.environ, "VFS_TIMEOUT": "75", "VFS_FINGER_SOCK": sock_path})
     if r.returncode != 0:
         return None
     return read_pgm(out)
@@ -64,8 +65,12 @@ def main():
             w, h, data = read_pgm(fixed_file)
         else:
             print(f"[bridge] scan {sent + 1}: swipe your finger...", file=sys.stderr)
-            cap = capture()
+            cap = capture(sock)
             if cap is None:
+                try:
+                    send_image(sock, -4, 0, b"")  # no image: clear the early finger-on
+                except OSError:
+                    pass
                 print("[bridge] capture failed; retrying", file=sys.stderr)
                 continue
             w, h, data = cap

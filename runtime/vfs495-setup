@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# vfs495-setup: record this sensor's setup data for the native driver, once, from ONE run of HP's driver.
+#
+#   sudo vfs495-setup            -> /var/lib/vfs495/setup.bin (root, 0600)
+#   vfs495-setup --prepare       only download, check, patch and build the shims, then clean up
+#                                (tests everything but the sensor run; no root needed)
+#
+# Downloads HP's Validity Linux driver (SoftPaq sp84530) from HP, checks it, runs its validity-sensor once
+# under gdb with the USB logger (runtime/usblog.c), dumping only the session key block
+# (runtime/dump_keyblock.py). As soon as HP has armed the sensor (no swipe needed), it stops HP, decrypts
+# the trace (runtime/trace_to_init.py), packs setup.bin (tools/make_setup_bin.py) and deletes HP's files,
+# the trace and the key block. HP's code never runs again after this; nothing of HP's is redistributed.
+#
+# Environment:
+#   VFS495_HP_TAR=PATH      use an already downloaded sp84530.tar instead of downloading
+#   VFS495_SETUP=PATH       where to write setup.bin (default /var/lib/vfs495/setup.bin)
+#   VFS495_CAPTURES=DIR     also keep init_cmds.json + capture_cmds.json there (the bridge backend uses them)
+#   VFS495_LIBUSB0=DIRS     directories (colon-separated) with libusb-0.1.so.4 and what it needs
+#                           (default: from ldconfig)
+#   VFS495_TOOLS=DIR        the repo's tools/ (default: ../tools next to this script)
+#   VFS495_KEEP_TRACE=DIR   debugging: keep the USB trace and key block there (per-device data, 0600)
+# Needs: curl or wget, md5sum, tar, 7z, gcc, gdb, python3 with cryptography + pyusb, libusb-0.1.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+TOOLS=${VFS495_TOOLS:-$HERE/../tools}
+SETUP=${VFS495_SETUP:-/var/lib/vfs495/setup.bin}
+URL=https://ftp.hp.com/pub/softpaq/sp84501-85000/sp84530.tar
+MD5=9877c69c4f4b57a00f9e4afbcd9baacc
+ARM_RECORD=3061        # the arming command (3033 B) as an encrypted record on the wire: 5 + 3033 + 20 MAC + 3 pad
+RUN_TIMEOUT=40
+
+say() { echo "vfs495-setup: $*"; }
+die() { echo "vfs495-setup: $*" >&2; exit 1; }
+
+prepare=
+case "${1:-}" in
+  --prepare) prepare=1 ;;
+  "") ;;
+  *) die "usage: vfs495-setup [--prepare]" ;;
+esac
+[ -n "$prepare" ] || [ "$(id -u)" = 0 ] || die "run as root (USB access, writes $SETUP)"
+for c in md5sum tar 7z gcc gdb python3; do
+  command -v "$c" >/dev/null || die "missing: $c"
+done
+python3 -c "import cryptography, usb" 2>/dev/null || die "python3 needs cryptography and pyusb"
+
+libusb0=${VFS495_LIBUSB0:-$(dirname "$(ldconfig -p 2>/dev/null | sed -n 's/.*libusb-0\.1\.so\.4 .*=> //p' | head -1)" 2>/dev/null || true)}
+found=
+IFS=: read -ra dirs <<<"$libusb0"
+for d in "${dirs[@]}"; do [ -e "$d/libusb-0.1.so.4" ] && found=1; done
+[ -n "$found" ] || die "libusb-0.1.so.4 not found (set VFS495_LIBUSB0)"
+
+work=$(mktemp -d /tmp/vfs495-setup.XXXXXX)
+chmod 700 "$work"
+fprintd_was_active=
+cleanup() {
+  pkill -KILL -f "$work/bin/validity-sensor-unlocked" 2>/dev/null || true
+  rm -rf "$work"                                   # HP's files, the trace, the key block
+  [ -z "$fprintd_was_active" ] || systemctl start fprintd || true
+}
+trap cleanup EXIT
+cd "$work"
+
+# 1. HP's package, from HP
+if [ -n "${VFS495_HP_TAR:-}" ]; then
+  cp "$VFS495_HP_TAR" sp84530.tar
+else
+  say "downloading HP's driver package (sp84530, ~3 MB) from HP"
+  if command -v curl >/dev/null; then curl -fsSL -o sp84530.tar "$URL"; else wget -qO sp84530.tar "$URL"; fi
+fi
+echo "$MD5  sp84530.tar" | md5sum -c --quiet - || die "checksum mismatch on sp84530.tar"
+tar xf sp84530.tar
+mkdir rpm
+(cd rpm && 7z x -y ../SP84530/Validity-Sensor-Setup-4.5-136.0.x86_64.rpm >/dev/null && 7z x -y ./*.cpio >/dev/null)
+[ -f rpm/usr/sbin/validity-sensor ] || die "validity-sensor not found in HP's package"
+
+# 2. the 5-byte patch that enables its diagnostic commands (runtime/README.md)
+mkdir bin lib
+python3 - rpm/usr/sbin/validity-sensor bin/validity-sensor-unlocked <<'PY'
+import sys
+d = bytearray(open(sys.argv[1], "rb").read()); off = 0x44122d - 0x400000
+assert d[off:off + 4] == bytes.fromhex("488b7b08"), "unexpected binary (need Validity 4.5-136)"
+d[off:off + 5] = b"\xe9" + (0x4412b4 - (0x44122d + 5)).to_bytes(4, "little", signed=True)
+open(sys.argv[2], "wb").write(d)
+PY
+chmod 700 bin/validity-sensor-unlocked
+
+# 3. loader shims: empty OpenSSL 0.9.8 stubs (HP's crypto is static), libusb-0.1, the USB logger
+echo 'void __vfs_stub(void){}' > stub.c
+gcc -shared -fPIC -Wl,-soname,libssl.so.0.9.8 -o lib/libssl.so.0.9.8 stub.c
+gcc -shared -fPIC -Wl,-soname,libcrypto.so.0.9.8 -o lib/libcrypto.so.0.9.8 stub.c
+gcc -shared -fPIC -O2 -o lib/usblog.so "$HERE/usblog.c" -ldl
+libpath=$work/lib:$libusb0
+if LD_LIBRARY_PATH=$libpath ldd bin/validity-sensor-unlocked | grep -q "not found"; then
+  LD_LIBRARY_PATH=$libpath ldd bin/validity-sensor-unlocked >&2
+  die "HP's binary has unresolved libraries"
+fi
+if [ -n "$prepare" ]; then
+  say "prepare ok: package verified, binary patched, shims built, all libraries resolve"
+  exit 0
+fi
+
+# 4. one HP run: init, session, setup, arming. fprintd must not hold the sensor meanwhile.
+if systemctl is-active --quiet fprintd 2>/dev/null; then
+  fprintd_was_active=1
+  systemctl stop fprintd
+fi
+say "running HP's driver once (no swipe needed, ~10 s)"
+VFS495_KEYBLOCK=$work/kb.json gdb -batch -nx \
+  -ex "set environment LD_LIBRARY_PATH=$libpath" \
+  -ex "set environment LD_PRELOAD=$work/lib/usblog.so" \
+  -ex "set environment VFSLOG=$work/usb.log" \
+  -x "$HERE/dump_keyblock.py" bin/validity-sensor-unlocked >gdb.log 2>&1 &
+gdb_pid=$!
+for _ in $(seq $((RUN_TIMEOUT * 2))); do
+  grep -q "OUT ep=01 len=$ARM_RECORD " usb.log 2>/dev/null && break
+  kill -0 "$gdb_pid" 2>/dev/null || break
+  sleep 0.5
+done
+sleep 1                                            # let the arming reply land in the trace
+pkill -KILL -f "$work/bin/validity-sensor-unlocked" 2>/dev/null || true
+kill "$gdb_pid" 2>/dev/null || true
+wait "$gdb_pid" 2>/dev/null || true
+
+if [ -n "${VFS495_KEEP_TRACE:-}" ]; then
+  install -d -m700 "$VFS495_KEEP_TRACE"
+  install -m600 usb.log gdb.log "$VFS495_KEEP_TRACE/"
+  [ ! -s kb.json ] || install -m600 kb.json "$VFS495_KEEP_TRACE/"
+fi
+[ -s kb.json ] || { tail -20 gdb.log >&2; die "HP's run did not reach the key exchange (log above)"; }
+
+# 5. decrypt + pack
+python3 "$HERE/trace_to_init.py" usb.log captures --keyblock kb.json
+install -d -m700 "$(dirname "$SETUP")"
+python3 "$TOOLS/make_setup_bin.py" captures setup.bin
+install -m600 setup.bin "$SETUP"
+if [ -n "${VFS495_CAPTURES:-}" ]; then
+  install -d -m700 "$VFS495_CAPTURES"
+  install -m600 captures/init_cmds.json captures/capture_cmds.json "$VFS495_CAPTURES/"
+fi
+
+# 6. HP left its session open: the sensor resets itself on the next command. Do that now, so the first
+#    open by fprintd doesn't fail.
+python3 - <<'PY' || true
+import time, usb.core
+d = usb.core.find(idVendor=0x138A, idProduct=0x003F)
+if d is not None:
+    try:
+        d.write(0x01, b"\x01", 1000); d.read(0x81, 0x400, 1000)
+    except usb.core.USBError:
+        pass
+    time.sleep(3)                                  # re-enumeration
+PY
+say "done: $SETUP. HP's files are deleted. Now enroll: fprintd-enroll"

@@ -1,5 +1,10 @@
 # Capture harness (runtime/)
 
+**For the native driver you only need `vfs495-setup`** (one command, see
+[`../docs/SETUP_FPRINTD.md`](../docs/SETUP_FPRINTD.md#native-driver)): it does the HP download, the patch, the
+shims and one traced run below by itself, writes `/var/lib/vfs495/setup.bin` and deletes HP's files.
+The rest of this page is the manual harness, used by the bridge and for reverse engineering.
+
 The capture path drives HP's proprietary `validity-sensor` binary (which establishes the sensor's
 secure session and performs the scan) under `gdb`, and harvests the descrambled / assembled image
 from its memory. **HP's binaries are NOT included here** — download them yourself (one-time), then

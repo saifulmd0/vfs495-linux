@@ -17,8 +17,9 @@ different fingers < 15. No sensor is touched unless --capture is used.
 import os, sys, re, glob, socket, struct, subprocess, tempfile, threading, time
 
 THRESHOLD = 40
-MIN_ROWS = 80
-CAPTURE = "/usr/lib/vfs495-fprint/capture.py"
+MIN_ROWS = int(os.environ.get("VFS_MIN_ROWS", "80"))  # scans shorter than this are rejected, as in bridge.py
+HP_CAPTURE = "/usr/lib/vfs495-fprint/capture.py"
+CAPTURE = os.environ.get("VFS495_CAPTURE", HP_CAPTURE)  # or the native capture
 
 # --- must happen before libfprint is loaded: private socket + score debug output ---
 _tmp = tempfile.mkdtemp(prefix="vfs495-match-")
@@ -154,7 +155,7 @@ def fmt(matched, score):
 
 def capture(n, d):
     if os.geteuid() != 0: raise SystemExit("--capture needs root: sudo vfs495-match --capture N")
-    if not os.path.exists("/var/lib/vfs495-fprint/validity-sensor-unlocked"):
+    if CAPTURE == HP_CAPTURE and not os.path.exists("/var/lib/vfs495-fprint/validity-sensor-unlocked"):
         raise SystemExit("HP driver not installed; run: sudo vfs495-setup-hp-driver")
     subprocess.run(["systemctl", "stop", "vfs495-bridge"], stderr=subprocess.DEVNULL)
     os.makedirs(d, exist_ok=True); files = []; tiny = []

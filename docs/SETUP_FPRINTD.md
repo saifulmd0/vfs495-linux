@@ -1,5 +1,58 @@
 # VFS495 fingerprint login: fprintd + PAM setup
 
+There are two ways to connect the sensor to `fprintd` (and through it to PAM: login screen, `sudo`, screen unlock):
+
+- **[Native driver](#native-driver)**: libfprint patched with the `vfs495` driver. No HP binary at runtime.
+- **[Bridge](#bridge)**: HP's binary under `gdb` feeds libfprint's `virtual_image` device. This is the Debian
+  package today, and the fallback.
+
+Templates don't carry over between the two: **re-enroll after switching**.
+
+---
+
+## Native driver
+
+### 1. Record your sensor's setup data (once)
+The sensor runs HP's firmware patches, which are authenticated to each sensor. They can't be shipped or
+generated, so you record them once from your own sensor:
+```bash
+sudo vfs495-setup        # NixOS module: installed. Otherwise: nix build ...callPackage ./runtime { }, or runtime/vfs495-setup
+```
+It downloads HP's driver package from HP (checksum verified) and runs HP's binary once (~10 s, **don't
+touch the sensor**). It then writes `/var/lib/vfs495/setup.bin` (root, 0600) and deletes HP's files and
+the USB trace. Without Nix it needs `curl`, `7z`, `gcc`, `gdb`, `libusb-0.1` and `python3` with
+`cryptography` + `pyusb`. `vfs495-setup --prepare` tests download and build without touching the sensor.
+
+### 2. fprintd with the patched libfprint
+**NixOS:**
+```nix
+imports = [ /path/to/vfs495-linux/nixos/module.nix ];
+services.vfs495.enable = true;                  # backend = "native" is the default
+security.pam.services.sudo.fprintAuth = true;   # and login / gdm-fingerprint as you like
+```
+`services.vfs495.debug = true;` logs every swipe and match score in `journalctl -u fprintd`.
+
+**Other distributions:** build libfprint with the driver (`driver/README.md`) and install it in place of
+the distribution's `libfprint-2.so.2`. There's no Debian package of the native driver yet.
+
+### 3. Enroll and test
+```bash
+fprintd-enroll           # 5 swipes of the same finger, normal speed, full length
+fprintd-verify
+sudo -k && sudo true     # in a spare terminal: the password still works as a fallback
+```
+"Swipe too fast" means what it says: swipe again a little slower. Normal swipes take about 0.5–1 s.
+
+### Troubleshooting (native)
+- `no setup file for this sensor yet`: run step 1.
+- The first open after a crash can fail with "sensor held a stale session and is resetting; try again".
+  The sensor re-enumerates and the next attempt works.
+- Driver-level test without fprintd: `driver/tests/hw_test.sh capture 5 /tmp/swipes` (stop fprintd first).
+
+---
+
+## Bridge
+
 This wires the working VFS495 capture path into `fprintd` (and therefore PAM: login screen,
 `sudo`, screen unlock). It uses the stock Debian `fprintd` + `libfprint` (which already ship
 the `virtual_image` driver), plus our capture bridge.
@@ -19,13 +72,13 @@ a native driver. A cleaner long-term build would port the assembly into a real l
 
 ---
 
-## 1. Install fprintd + PAM module + the virtual driver's python dep
+### 1. Install fprintd + PAM module + the virtual driver's python dep
 ```bash
 sudo apt install fprintd libpam-fprintd python3-usb python3-numpy python3-scipy python3-pil
 ```
 (`gdb` and the capture tools are already installed under ~/vfs495-re.)
 
-## 2. Point fprintd at the virtual_image socket
+### 2. Point fprintd at the virtual_image socket
 Create a systemd drop-in so fprintd exposes the socket the bridge feeds:
 ```bash
 sudo mkdir -p /etc/systemd/system/fprintd.service.d
@@ -40,7 +93,7 @@ sudo systemctl restart fprintd
 ```
 Now `fprintd` sees exactly one device: the virtual image device.
 
-## 3. Run the capture bridge (as root — needs USB + gdb)
+### 3. Run the capture bridge (as root — needs USB + gdb)
 Install it as a service:
 ```bash
 sudo tee /etc/systemd/system/vfs495-bridge.service >/dev/null <<'EOF'
@@ -66,7 +119,7 @@ The bridge loops: it runs a capture (which blocks up to ~75 s waiting for a swip
 the assembled image to the socket. So **whenever you swipe, an image is delivered** — during
 enroll or verify that becomes the scan; at any other time it's harmlessly dropped.
 
-## 4. Enroll your finger
+### 4. Enroll your finger
 ```bash
 fprintd-enroll        # enrolls the right index by default; -f <finger> for others
 ```
@@ -76,7 +129,7 @@ Verify enrollment:
 fprintd-verify        # swipe again → should say "verify-match"
 ```
 
-## 5. Turn on fingerprint for PAM (login / sudo / unlock)
+### 5. Turn on fingerprint for PAM (login / sudo / unlock)
 ```bash
 sudo pam-auth-update          # tick "Fingerprint authentication", confirm
 ```
@@ -88,7 +141,7 @@ sudo -k && sudo true          # should prompt to swipe; password still works as 
 
 ---
 
-## Caveats & troubleshooting
+### Caveats & troubleshooting
 - **Root capture / gdb.** The bridge runs the proprietary binary under gdb as root. That's why
   it's a service. It relies on `~/vfs495-re/runtime/bin/validity-sensor-unlocked` + the harvest
   scripts; keep that tree in place.

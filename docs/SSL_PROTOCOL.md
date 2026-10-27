@@ -20,8 +20,9 @@ standard (RSA-2048, MD5, SHA-1, AES-CBC), so it is implementable with NSS or `cr
 3. **Sensor RSA public key** comes from the SENSOR, not the host: scsSSLEstablishSession builds
    key = { size 0x100 (2048b), exp 0x10001, modulus 256B read via scsGetDataFromStorage(id=10) }.
    Dumped modulus: `captures/rsa_modulus.bin` (per-sensor; starts bd2f0c74…, exp 65537).
-   TODO for driver: issue the storage-read (scsGetDataFromStorage @0x511c30, storage id 10) instead of
-   using the dumped constant.
+   Storage id 10 lives in the 4 KiB flash block that init already reads (1f05, flash 0x1000-0x1fff):
+   storage table from byte 13, entries `ff <id> <u32 addr LE> <u32 size LE>`, id 10 at 0x16b6. NOTE: HP
+   sets up a second, different RSA key first; that one is NOT the key-exchange key.
 4. **premaster** = `03 00` + 46 random  (48 B).
 5. **ClientKeyExchange** (scsSSLClientKeyExchangeWrite → scsSSLRsaPublicEncrypt): RSA-encrypt the 48-B
    premaster with the sensor key (PKCS#1 v1.5) → 256 B, **byte-reversed** on output. Record
@@ -36,7 +37,8 @@ standard (RSA-2048, MD5, SHA-1, AES-CBC), so it is implementable with NSS or `cr
    label 'CLNT' = 0x434c4e54; SSLv3 finished =
    `MD5( master + pad2(0x5c×48) + MD5( handshake_msgs + 'CLNT' + master + pad1(0x36×48) ) )` and the
    SHA1 equiv concatenated (12+ bytes per SSLv3). Sent AES-encrypted.
-   Server Finished label 'SRVR' = 0x53525652.
+   Server Finished label 'SRVR' = 0x53525652, computed over the SAME messages as the client Finished
+   (the client Finished itself is NOT hashed in, unlike standard SSLv3).
 
 ## Record encryption (scsSSLRecordPack, once cipher active — flag 0x13c&2)
 - MAC (scsSSLMacSha, SSLv3): `SHA1( mac_key[20] + pad2(0x5c×40) + SHA1( mac_key[20] + pad1(0x36×40)
@@ -71,6 +73,12 @@ firmware (not in the host binary), so its exact trigger isn't in the decompile. 
     replicate the exact capture ordering incl. the post-ServerHello patches);
 (b) premaster version-byte / client_version check nuance;
 (c) capture MY session over usbmon and diff structurally vs the tool's BEST-swipe capture.
+Update 2026-10-09: timing and init-state ruled out (exact replay of HP's clean-state run, same pauses,
+ServerHello->flight 3.7 ms vs HP's 4.7 ms, still 0x2f ~256 ms after the flight). The sensor keeps HP's
+session after HP exits, which makes a session takeover possible. Details in docs/FINDINGS.md (2026-10-09).
+**SOLVED 2026-10-09:** 0x2f came from encrypting with the wrong RSA key. HP sets up two keys at 0x51fac0;
+the dumped first one is not the session key, the SECOND one is. With it the handshake completes (sensor
+answers CCS + Finished). See docs/FINDINGS.md.
 
 ## Reference vectors (one real session, gdb) — `captures/ssl_secrets.json`
 premaster / master / keyblock captured for offline KDF validation. (randoms live in a sub-struct;

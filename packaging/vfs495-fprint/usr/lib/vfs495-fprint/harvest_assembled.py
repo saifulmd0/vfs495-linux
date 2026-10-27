@@ -1,7 +1,7 @@
 # gdb python: harvest the motion-compensated assembled fingerprint image from HP's
 # validity-sensor (4.5-136) at IRqualityDetermination (0x4689b0). Writes:
 #   <u32 dim1><u32 dim2><dim1*dim2 bytes>  to $VFS_ASM_OUT
-import gdb, os, struct
+import gdb, os, socket, struct
 OUT = os.environ.get("VFS_ASM_OUT", "/tmp/vfs495_asm.bin")
 hit = {"n": 0}
 class BP(gdb.Breakpoint):
@@ -20,5 +20,21 @@ class BP(gdb.Breakpoint):
         except gdb.MemoryError: pass
         return False
 BP("*0x4689b0")
+# Finger-on: HP raises sensor event 0xd0 (idsSensorEventPerformCallback, event id in esi) when its
+# wake-on-event sees a finger => it is silent while idle (0xcc = armed). Report it once to virtual_image
+# as (-4, 1) so fprintd's finger-present goes true at swipe start, not after the image is assembled.
+FINGER_SOCK = os.environ.get("VFS_FINGER_SOCK")
+class FingerOnBP(gdb.Breakpoint):
+    def stop(self):
+        try:
+            if int(gdb.selected_frame().read_register("rsi")) & 0xffffffff != 0xd0: return False
+        except gdb.error: return False
+        self.enabled = False
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(1)
+            s.connect(FINGER_SOCK); s.sendall(struct.pack("<ii", -4, 1)); s.close()
+        except OSError: pass
+        return False
+if FINGER_SOCK: FingerOnBP("*0x459bf0")
 gdb.execute("run getprintwait -doinit")
 gdb.execute("quit")
